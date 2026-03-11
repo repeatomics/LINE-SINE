@@ -1,12 +1,3 @@
-# импорты
-
-from pathlib import Path
-import subprocess
-import pandas as pd
-import matplotlib.pyplot as plt
-import pysam
-
-
 class Sample:
     
     def __init__(self, sample_id, r1_path, r2_path):
@@ -68,7 +59,28 @@ class Sample:
         df = pd.read_csv(depth_file, sep="\t", names=["chr", "pos", "depth"])
 
         return df
+        
+    def coverage_table_mb(self, window_size=1_000_000):
+        depth_file = self.bam_dir / f"{self.id}.1mb.cov.tsv"
 
+        with pysam.AlignmentFile(self.bam_file, "rb") as bam, open(depth_file, "w") as f:
+            coverage = {}
+            for col in bam.pileup():
+                chrom = col.reference_name
+                window = col.pos // window_size
+                if (chrom, window) not in coverage:
+                    coverage[(chrom, window)] = 0
+                coverage[(chrom, window)] += col.nsegments
+
+            for (chrom, window), depth_sum in sorted(coverage.items()):
+                start = window * window_size
+                end = start + window_size
+                mean_depth = depth_sum / window_size
+                f.write(f"{chrom}\t{start}\t{end}\t{mean_depth}\n")
+
+    df = pd.read_csv(depth_file, sep="\t", names=["chr", "start", "end", "coverage"])
+    return df
+    
     def plot_chromosome_coverage(self, chrom="chr1", window_size=100_000):
         
         df = pd.read_csv(
