@@ -126,11 +126,87 @@ class Pipeline:
             )
             samples.append(sample)
         return samples
+        
+    def compute_zscore(self, dfs, total_reads):
+        tables = []
+    
+        for sample_id, df in dfs.items():
+            df = df[["chr","start","coverage"]].copy()
+            df[sample_id] = df["coverage"] / total_reads[sample_id] * 1_000_000
+            tables.append(df[["chr","start",sample_id]])
 
+        merged = tables[0]
+
+        for x in tables[1:]:
+            merged = merged.merge(t, on=["chr","start"])
+
+        sample_cols = list(dfs())
+
+        mean = merged[sample_cols].mean(axis=1)
+        std = merged[sample_cols].std(axis=1)
+
+        for col in sample_cols:
+            merged[col+"_z"] = (merged[col] - mean) / std
+
+        return merged
+
+    def plot_chromosomes(self, df):
+        chrom_means = df.groupby("chr").mean(numeric_only=True)
+
+        plt.figure(figsize=(12,5))
+
+        for col in df.columns:
+            if col.endswith("_z"):
+                plt.scatter(
+                    chrom_means.index,
+                    chrom_means[col],
+                    s=80,
+                    label=col.replace("_z",""))
+
+        plt.xlabel("Chromosome")
+        plt.ylabel("Mean Z-score")
+        plt.title("Mean Z-score per chromosome")
+
+        plt.xticks(rotation=45)
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
+            
+    def plot_bins(self, df):
+        x = np.arange(len(df))
+
+        plt.figure(figsize=(15,6))
+
+        for col in df.columns:
+            if col.endswith("_z"):
+                plt.scatter(
+                    x,
+                    df[col],
+                    s=3,
+                    alpha=0.6,
+                    label=col.replace("_z",""))
+
+        plt.axhline(0, linestyle="--")
+        plt.xlabel("Genomic bins")
+        plt.ylabel("Z-score")
+        plt.title("Z-score per genomic bin")
+
+        plt.legend()
+        plt.tight_layout()
+        plt.show()  
+            
     def run(self):
         for sample in self.samples:
             sample.trim()
             sample.align(self.reference)
 
-            df = sample.coverage_table()
-            sample.plot_coverage(df)
+            df = sample.coverage_table_mb()
+
+            dfs[sample.id] = df
+            total_reads[sample.id] = df["coverage"].sum()
+
+        z_df = self.compute_zscore(dfs, total_reads)
+
+        self.plot_chromosomes(z_df)
+        self.plot_bins(z_df)
+        return z_df
