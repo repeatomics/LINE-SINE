@@ -3,7 +3,7 @@ import pysam
 from pathlib import Path
 import numpy as np
 import subprocess
-
+import matplotlib.pyplot as plt
 
 
 output_dir = Path("output")
@@ -102,6 +102,7 @@ class Pipeline:
             tables.append(df)
 
         merged = tables[0]
+        
         for t in tables[1:]:
             merged = merged.merge(t, on=["chr", "start"], how="inner")
 
@@ -134,6 +135,64 @@ class Pipeline:
 
         return result
 
+    def plot_zscores(self, z_df):
+
+    self.samples[0].plots_dir.mkdir(exist_ok=True)
+
+    for col in z_df.columns:
+        if col.endswith("_z"):
+            
+            sample_id = col.replace("_z", "")
+            df = z_df[["chr", "start", col]].copy()
+
+            plt.figure(figsize=(12, 4))
+            plt.scatter(df["start"], df[col], s=5)
+
+            plt.axhline(0)
+            plt.title(f"Z-score: {sample_id}")
+            plt.xlabel("Genomic position")
+            plt.ylabel("Z-score")
+
+            out_path = self.samples[0].plots_dir / f"{sample_id}_zscore.png"
+            plt.savefig(out_path, dpi=150)
+            plt.close()
+
+    def plot_coverage(self, dfs):
+
+    self.samples[0].plots_dir.mkdir(exist_ok=True)
+
+    for sample_id, df in dfs.items():
+
+        df = df.copy()
+
+        # сортировка по chr и позиции
+        df = df.sort_values(["chr", "start"])
+
+        # создаём "глобальную координату"
+        chr_offsets = {}
+        offset = 0
+
+        for chrom in df["chr"].unique():
+            chr_len = df[df["chr"] == chrom]["start"].max()
+            chr_offsets[chrom] = offset
+            offset += chr_len
+
+        df["global_pos"] = df.apply(
+            lambda row: row["start"] + chr_offsets[row["chr"]],
+            axis=1
+        )
+
+        plt.figure(figsize=(14, 4))
+        plt.plot(df["global_pos"], df["coverage"], linewidth=0.7)
+
+        plt.title(f"Coverage: {sample_id}")
+        plt.xlabel("Genome")
+        plt.ylabel("Coverage")
+
+        out_path = self.samples[0].plots_dir / f"{sample_id}_coverage.png"
+        plt.savefig(out_path, dpi=150)
+        plt.close()
+            
     def run(self):
 
         self.run_preprocessing()
@@ -148,8 +207,10 @@ class Pipeline:
         z_df = self.compute_zscore(dfs)
 
         z_df.to_csv("zscore.tsv", sep="\t", index=False)
-
-
+        
+        self.plot_zscores(z_df)
+        self.plot_coverage(dfs)
+        
 if __name__ == "__main__":
     pipeline = Pipeline(
         samples_table="samples.tsv",
