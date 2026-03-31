@@ -4,105 +4,124 @@ from pathlib import Path
 import numpy as np
 import subprocess
 import matplotlib.pyplot as plt
+import sys
 
 
-output_dir = Path("output")
 class Sample:
-    
-    def __init__(self, sample_id, r1_path, r2_path):
-        self.id = sample_id
-        self.r1 = Path(r1_path)
-        self.r2 = Path(r2_path)
-        self.sample_dir = output_dir / self.id
-        
-        self.trimmed_dir = Path("trimmed")
-        self.bam_dir = Path("bam")
-        self.plots_dir = Path("plots")
+
+    def __init__(self, sample_id, r1, r2, run):
+        self.id = str(sample_id)
+        self.run = run
+
+        self.r1 = Path(r1)
+        self.r2 = Path(r2)
+
+        self.base = Path("output") / run / self.id
+
+        self.trimmed_dir = self.base / "trim"
+        self.bam_dir = self.base / "bam"
+        self.plots_dir = self.base / "plots"
 
         for d in [self.trimmed_dir, self.bam_dir, self.plots_dir]:
             d.mkdir(parents=True, exist_ok=True)
-            
-        self.r1_trim = self.trimmed_dir / f"{self.id}_R1.trim.fastq.gz"
-        self.r2_trim = self.trimmed_dir / f"{self.id}_R2.trim.fastq.gz"
-        self.bam_file = self.bam_dir / f"{self.id}.sorted.bam"
+
+        self.r1_trim = self.trimmed_dir / "R1.fastq.gz"
+        self.r2_trim = self.trimmed_dir / "R2.fastq.gz"
+
+        self.bam = self.bam_dir / f"{self.id}.bam"
 
     def trim(self):
-
-        cmd = [
+        subprocess.run([
             "fastp",
             "-i", str(self.r1),
             "-I", str(self.r2),
             "-o", str(self.r1_trim),
-            "-O", str(self.r2_trim),
-            "--qualified_quality_phred", "20",
-            "--length_required", "30"
-        ]
-
-        subprocess.run(cmd, check=True)
+            "-O", str(self.r2_trim)
+        ], check=True)
 
     def align(self, reference):
 
         cmd = (
             f"bwa mem {reference} {self.r1_trim} {self.r2_trim} "
             f"| samtools view -b - "
-            f"| samtools sort -o {self.bam_file}"
+            f"| samtools sort -o {self.bam}"
         )
 
         subprocess.run(cmd, shell=True, check=True)
-        subprocess.run(["samtools", "index", str(self.bam_file)], check=True)
+        subprocess.run(["samtools", "index", str(self.bam)], check=True)
 
-    def coverage_table(self, window_size=1_000_000):
+    def coverage(self, window=1_000_000):
 
-        coverage = {}
+        cov = {}
 
-        with pysam.AlignmentFile(self.bam_file, "rb") as bam:
-            for col in bam.pileup():
+        with pysam.AlignmentFile(self.bam, "rb") as bam:
+            for col in bam.pileup(min_mapping_quality=20):
                 chrom = col.reference_name
-                window = col.pos // window_size
-                coverage[(chrom, window)] = coverage.get((chrom, window), 0) + col.nsegments
+                w = col.pos // window
+
+                key = (chrom, w)
+                cov[key] = cov.get(key, 0) + col.nsegments
 
         rows = []
-        for (chrom, window), depth in coverage.items():
-            start = window * window_size
-            rows.append([chrom, start, depth])
+        for (chrom, w), val in cov.items():
+            rows.append([chrom, w * window, val / window])
 
-        df = pd.DataFrame(rows, columns=["chr", "start", "coverage"])
-
-        return df
+        return pd.DataFrame(rows, columns=["chr", "start", "coverage"])
 
 
 class Pipeline:
 
-    def __init__(self, samples_table, reference):
-        self.samples_table = samples_table
-        self.reference = reference
-        self.samples = self.load_samples()
+    def __init__(self, input_root, reference):
 
-    def load_samples(self):
-        df = pd.read_csv(self.samples_table, sep="\t")
-        return [
-            Sample(row["ID"], row["R1"], row["R2"])
-            for _, row in df.iterrows()
-        ]
+        self.input_root = Path(input_root)
+        self.reference = reference
+
+        self.samples = self.find_samples()
+
+    def find_samples(self):
+
+        samples = []
+
+        for run_dir in self.input_root.iterdir():
+
+            if not run_dir.is_dir():
+                continue
+
+            run_name = run_dir.name
+
+            r1_files = list(run_dir.glob("*R1*.fastq*"))
+
+            for r1 in r1_files:
+
+                r2 = Path(str(r1).replace("R1", "R2"))
+
+                if not r2.exists():
+                    continue
+
+                sample_id = r1.stem.split("_")[0]
+
+                samples.append(Sample(sample_id, r1, r2, run_name))
+
+        return samples
 
     def run_preprocessing(self):
-        for sample in self.samples:
-            print(f"\n=== Processing {sample.id} ===")
 
-            sample.trim()
-            sample.align(self.reference)
+        for s in self.samples:
+            print(f"\nProcessing {s.run}/{s.id}")
+
+            s.trim()
+            s.align(self.reference)
 
     def compute_zscore(self, dfs):
 
         tables = []
 
         for sample_id, df in dfs.items():
-            df = df[["chr", "start", "coverage"]].copy()
-            df = df.rename(columns={"coverage": sample_id})
+            df = df.rename(columns={"coverage": str(sample_id)})
             tables.append(df)
 
         merged = tables[0]
-        
+
         for t in tables[1:]:
             merged = merged.merge(t, on=["chr", "start"], how="inner")
 
@@ -110,17 +129,10 @@ class Pipeline:
 
         coords = merged[["chr", "start"]].reset_index(drop=True)
 
-        numeric = merged[sample_cols].apply(pd.to_numeric, errors="coerce")
-
-        mask = numeric.notnull().all(axis=1)
-        numeric = numeric[mask].reset_index(drop=True)
-        coords = coords[mask].reset_index(drop=True)
-
-        nonzero_mask = (numeric != 0).any(axis=1)
-        numeric = numeric[nonzero_mask].reset_index(drop=True)
-        coords = coords[nonzero_mask].reset_index(drop=True)
+        numeric = merged[sample_cols].fillna(0)
 
         values = numeric.to_numpy(dtype=float)
+
         mean = np.mean(values, axis=1, keepdims=True)
         std = np.std(values, axis=1, keepdims=True)
 
@@ -128,93 +140,82 @@ class Pipeline:
 
         z = (values - mean) / std
 
-        z_cols = [f"{col}_z" for col in sample_cols]
-        z_df = pd.DataFrame(z, columns=z_cols)
+        z_df = pd.DataFrame(z, columns=[f"{c}_z" for c in sample_cols])
 
-        result = pd.concat([coords, z_df], axis=1)
+        return pd.concat([coords.reset_index(drop=True), z_df.reset_index(drop=True)], axis=1)
 
-        return result
-
-    def plot_zscores(self, z_df):
-
-    self.samples[0].plots_dir.mkdir(exist_ok=True)
-
-    for col in z_df.columns:
-        if col.endswith("_z"):
-            
-            sample_id = col.replace("_z", "")
-            df = z_df[["chr", "start", col]].copy()
-
-            plt.figure(figsize=(12, 4))
-            plt.scatter(df["start"], df[col], s=5)
-
-            plt.axhline(0)
-            plt.title(f"Z-score: {sample_id}")
-            plt.xlabel("Genomic position")
-            plt.ylabel("Z-score")
-
-            out_path = self.samples[0].plots_dir / f"{sample_id}_zscore.png"
-            plt.savefig(out_path, dpi=150)
-            plt.close()
-
-    def plot_coverage(self, dfs):
-
-    self.samples[0].plots_dir.mkdir(exist_ok=True)
-
-    for sample_id, df in dfs.items():
+    def add_genome_pos(self, df):
 
         df = df.copy()
 
-        # сортировка по chr и позиции
+        df["chr"] = df["chr"].astype(str).str.replace("chr", "")
+
+        chrom_order = [str(i) for i in range(1, 23)] + ["X", "Y", "M"]
+        df["chr"] = pd.Categorical(df["chr"], categories=chrom_order, ordered=True)
+
         df = df.sort_values(["chr", "start"])
 
-        # создаём "глобальную координату"
-        chr_offsets = {}
-        offset = 0
+        chrom_sizes = df.groupby("chr")["start"].max().cumsum().shift(fill_value=0)
 
-        for chrom in df["chr"].unique():
-            chr_len = df[df["chr"] == chrom]["start"].max()
-            chr_offsets[chrom] = offset
-            offset += chr_len
-
-        df["global_pos"] = df.apply(
-            lambda row: row["start"] + chr_offsets[row["chr"]],
+        df["genome_pos"] = df.apply(
+            lambda row: row["start"] + chrom_sizes[row["chr"]],
             axis=1
         )
 
-        plt.figure(figsize=(14, 4))
-        plt.plot(df["global_pos"], df["coverage"], linewidth=0.7)
+        return df
 
-        plt.title(f"Coverage: {sample_id}")
-        plt.xlabel("Genome")
-        plt.ylabel("Coverage")
+    def plot_zscores(self, z_df):
 
-        out_path = self.samples[0].plots_dir / f"{sample_id}_coverage.png"
-        plt.savefig(out_path, dpi=150)
-        plt.close()
-            
+        out = Path("plots")
+        out.mkdir(parents=True, exist_ok=True)
+
+        df = self.add_genome_pos(z_df)
+
+        for col in df.columns:
+            if not col.endswith("_z"):
+                continue
+
+            plt.figure(figsize=(12, 4))
+            plt.scatter(df["genome_pos"], df[col], s=2)
+
+            plt.axhline(0)
+            plt.axhline(2, linestyle="--")
+            plt.axhline(-2, linestyle="--")
+            plt.xlabel("Genome position")
+            plt.ylabel("Z-score")
+
+            out_file = out / f"{col}.png"
+
+            if out_file.exists():
+                out_file.unlink()
+
+            plt.savefig(out_file, dpi=150)
+            plt.close()
+
     def run(self):
 
         self.run_preprocessing()
 
         dfs = {}
 
-        for sample in self.samples:
-            print(f"Computing coverage: {sample.id}")
-            df = sample.coverage_table()
-            dfs[sample.id] = df
+        for s in self.samples:
+            print(f"Coverage {s.id}")
+
+            dfs[s.id] = s.coverage()
 
         z_df = self.compute_zscore(dfs)
 
         z_df.to_csv("zscore.tsv", sep="\t", index=False)
-        
-        self.plot_zscores(z_df)
-        self.plot_coverage(dfs)
-        
-if __name__ == "__main__":
-    pipeline = Pipeline(
-        samples_table="samples.tsv",
-        reference="reference.fa"
-    )
 
+        print(z_df.head())
+
+        self.plot_zscores(z_df)
+
+
+if __name__ == "__main__":
+
+    input_root = sys.argv[1]
+    reference = sys.argv[2]
+
+    pipeline = Pipeline(input_root, reference)
     pipeline.run()
