@@ -11,6 +11,45 @@ Repetitive elements LINE and SINE are widely spread across human genome and can 
 - Variant calling
 - VAF estimation
 
+```mermaid
+flowchart LR
+
+subgraph INPUT[Input data]
+A1[FASTQ R1]
+A2[FASTQ R2]
+end
+
+subgraph PREP[Preprocessing]
+B[fastp trimming]
+end
+
+subgraph ALIGN[Alignment]
+C[BWA mem]
+D[SAMtools sort/index]
+end
+
+subgraph ANALYSIS[Analysis]
+E[Coverage calculation]
+F[Variant calling]
+G[VAF calculation]
+end
+
+subgraph OUTPUT[Outputs]
+H[Coverage plots]
+I[metrics.tsv]
+J[VCF files]
+end
+
+A1 --> B
+A2 --> B
+B --> C --> D
+D --> E
+D --> F --> G
+E --> H
+G --> I
+F --> J
+```
+
 ## Tools used
 
 - `fastp` - trimming
@@ -38,6 +77,7 @@ Install Python dependencies:
 
 ```bash
 pip install -r requirements.txt
+```
 
 ## External tools
 
