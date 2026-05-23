@@ -197,6 +197,21 @@ Run notebooks in order:
 
 ---
 
+## Output metrics - metrics.tsv
+
+The pipeline generates a summary table:
+
+| sample | metric       | value |
+|--------|-------------|-------|
+| S1     | mean_cov    | 18.42 |
+| S1     | mean_vaf    | 0.37  |
+| S1     | n_variants  | 1240  |
+| S2     | mean_cov    | 21.10 |
+| S2     | mean_vaf    | 0.41  |
+| S2     | n_variants  | 980   |
+
+---
+
 ## Example workflow
 
 ```bash
