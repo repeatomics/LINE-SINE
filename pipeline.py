@@ -11,10 +11,25 @@ import sys
 
 class MetricsCollector:
 
-    def __init__(self):
-        self.rows = []
+    """
+    Container for collecting per-sample QC metrics.
 
+    Stores metrics in memory and exports them as a TSV table.
+    """
+
+    def __init__(self):
+        """Initialize empty metrics storage."""
+        self.rows = []
+        
     def add(self, sample_id, metric, value):
+        """
+        Add a metric value for a sample.
+
+        Args:
+            sample_id -> str: sample name
+            metric -> str: metric name 
+            value -> float: numeric value 
+        """
         self.rows.append({
             "sample": sample_id,
             "metric": metric,
@@ -22,14 +37,41 @@ class MetricsCollector:
         })
 
     def save(self, path):
+        """
+        Save all metrics to TSV file.
+
+        Args:
+            path -> str: output path
+        """
         pd.DataFrame(self.rows).to_csv(path, sep="\t", index=False)
 
 
 # SAMPLE
 
 class Sample:
+    """
+    A single sequencing sample in the pipeline.
+
+    This object stores all sample-related files and runs processing steps:
+    trimming, alignment, coverage calculation, variant calling, and VAF estimation.
+
+    Input:
+        FASTQ (R1/R2) or pre-aligned BAM
+    Output:
+        Processed BAM, coverage tables, VCF, VAF table, QC reports
+    """
 
     def __init__(self, sample_id, run, r1=None, r2=None, bam=None):
+        """
+        Initialize a Sample.
+
+        Args:
+            sample_id -> str: sample name 
+            run -> str: dataset or run name
+            r1 -> path or str: FASTQ R1 file
+            r2 --> path or str: FASTQ R2 file
+            bam -> path or str: pre-aligned BAM file
+        """
 
         self.id = str(sample_id)
         self.run = run
@@ -85,6 +127,15 @@ class Sample:
     # TRIM
 
     def trim(self):
+        """
+        Run FASTP trimming.
+
+        Input:
+            self.r1, self.r2 -> FASTQ.gz
+
+        Output:
+            Trimmed FASTQ files
+        """
 
         if self.r1 is None or self.r2 is None:
             raise ValueError("FASTQ not provided")
@@ -106,6 +157,15 @@ class Sample:
     # ALIGN
 
     def align(self, reference):
+        """
+        Run align reads to reference genome using BWA-MEM.
+
+        Input:
+            reference -> str: path to reference FASTA
+
+        Output:
+            Sorted and indexed BAM file
+        """
 
         cmd = (
             f"bwa mem -t 6 {reference} "
@@ -124,6 +184,18 @@ class Sample:
     # COVERAGE
 
     def coverage(self, bin_size=1_000_000):
+        """
+        Calculate genome-wide coverage in fixed bins.
+
+        Input:
+            bin_size -> int: size of genomic bins (bp)
+
+        Output:
+            pd.DataFrame with columns:
+              chr -> str
+              start -> int
+              coverage -> float
+        """
 
         if not Path(self.bam).exists():
             return pd.DataFrame(
@@ -177,6 +249,15 @@ class Sample:
     # PLOT COVERAGE
 
     def plot_genome_coverage(self, cov_df):
+        """
+        Plot genome-wide coverage profile.
+
+        Input:
+            cov_df -> DataFrame()
+
+        Output:
+            PNG plot saved 
+        """
 
         if cov_df.empty:
             return
@@ -209,6 +290,15 @@ class Sample:
     # VARIANT CALLING
 
     def call_variants(self, reference):
+        """
+        Call variants using bcftools.
+
+        Input:
+            reference -> str: reference genome
+
+        Output:
+            VCF file (.vcf.gz)
+        """
 
         vcf = self.base / f"{self.id}.vcf.gz"
 
@@ -236,6 +326,18 @@ class Sample:
     # VAF
 
     def compute_vaf(self, vcf):
+        """
+        Compute Variant Allele Frequency from VCF.
+
+        Input:
+            vcf -> str: path to VCF file
+
+        Output:
+            pd.DataFrame with:
+             chr
+             pos
+             vaf
+        """
 
         cmd = (
             f"bcftools query "
@@ -305,8 +407,41 @@ class Sample:
 # PIPELINE
 
 class Pipeline:
+    """
+    Main controller of the sequencing pipeline.
+
+    Runs full analysis workflow from raw data to final metrics:
+
+    Steps:
+     Sample detection (FASTQ or BAM mode)
+     Trimming (fastp)
+     Alignment (BWA-MEM)
+     Coverage calculation
+     Variant calling (bcftools)
+     VAF computation
+     Metrics comparation
+
+    Input:
+        Directory with FASTQ or BAM files + reference genome
+
+    Output:
+     metrics.tsv 
+     per-sample coverage data
+     VCF files
+     VAF tables
+    """
 
     def __init__(self, root, ref):
+        """
+        Create a sample object.
+
+        Args:
+            sample_id -> str: sample identifier
+            run -> str: dataset name
+            r1 -> path or str: FASTQ R1 file
+            r2 -> path or str: FASTQ R2 file
+            bam -> path or str: pre-aligned BAM file
+        """
 
         self.root = Path(root)
         self.ref = ref
@@ -320,6 +455,16 @@ class Pipeline:
     # FIND SAMPLES
 
     def find_samples(self):
+        """
+        Scanning input directory and detect samples.
+
+        Supports:
+         FASTQ mode -> R1/R2 pairs
+         BAM mode -> pre-aligned files
+
+        Output:
+            self.samples
+        """
 
         run_name = self.root.name
 
@@ -378,6 +523,19 @@ class Pipeline:
     # RUN
 
     def run(self):
+        """
+        Execute full pipeline:
+
+        1. Trim 
+        2. Align 
+        3. Coverage calculation
+        4. Variant calling
+        5. VAF calculation
+        6. Metrics export
+
+        Output:
+            metrics.tsv
+        """
 
         print("SAMPLES:", len(self.samples))
 
