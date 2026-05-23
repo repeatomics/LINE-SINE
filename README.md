@@ -187,11 +187,13 @@ VAF is computed from AD (allele depth) fields.
 
 ## Visualization
 
-Notebook examples:
+Run notebooks in order:
 
-```
-notebooks/
-```
+1. metrics
+2. coverage analysis
+3. z-score analysis
+4. correlation heatmap
+5. examples
 
 ---
 
