@@ -22,8 +22,6 @@ RUN pip install --no-cache-dir \
     pandas==2.0.3 \
     numpy==1.24.3 \
     matplotlib==3.7.2 \
-    seaborn==0.12.2 \
-    scikit-learn==1.3.0 \
     pysam==0.21.0 \
     jupyter
 
@@ -34,4 +32,4 @@ WORKDIR /app
 COPY . /app/
 
 # entrypoint
-ENTRYPOINT ["python", "pipeline.py"]
+ENTRYPOINT ["python", "main.py"]
