@@ -195,6 +195,7 @@ Run notebooks in order:
 4. correlation heatmap
 5. examples
 
+![A general example](plots_examples/common_example.jpg)
 ---
 
 ## Output metrics - metrics.tsv
