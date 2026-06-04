@@ -1,6 +1,7 @@
 # LINE-SINE
 
-Repetitive elements LINE and SINE are widely spread across human genome and can serve as "anchors" for targeted sequencing. For targeted LINE enrichment only single primer set can be used that significantly simplifies enrichment process. Target sequencing can be used to detect large genomic alterations (CNV, LOH > 10 Mb).
+Repetitive elements LINE and SINE are widely spread across human genome. Due to their high density and relatively uniform distribution, LINE/SINE elements can be used as anchor points for enrichment and subsequent targeted sequencing aimed at detecting large chromosomal abnormalities. This approach is particularly useful for identifying large genomic rearrangements, including deletions, duplications, and structural variants, because changes in copy number or chromosomal segment organization result in altered relative sequencing coverage.
+This repository provides a pipeline for LINE/SINE-targeted sequencing data analysis: FASTQ preprocessing (fastp), alignment (BWA-MEM), BAM processing (samtools), coverage calculation (configurable bin size), variant calling (bcftools), VAF estimation, and visualization notebooks.
 
 ## Pipeline features
 
